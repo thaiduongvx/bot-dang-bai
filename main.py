@@ -25,6 +25,7 @@ HEADERS = {
 }
 
 def get_gemini_question():
+    # Sử dụng đúng endpoint v1beta và model gemini-1.5-flash
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
     prompt = (
         "Đóng vai một khách du lịch thật đang muốn đi Hà Giang hoặc vừa đi về. "
@@ -33,15 +34,27 @@ def get_gemini_question():
         "thuyền sông Nho Quế, quán ăn... Văn phong tự nhiên, đời thường. "
         "Chỉ trả về duy nhất nội dung câu hỏi, không thêm bất kỳ lời dẫn nào."
     )
-    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+    payload = {
+        "contents": [{
+            "parts": [{"text": prompt}]
+        }]
+    }
     try:
-        res = requests.post(url, json=payload, timeout=30).json()
+        response = requests.post(url, json=payload, timeout=30)
+        res = response.json()
+        
+        # Nếu có lỗi từ Google, in rõ nội dung lỗi ra màn hình
+        if "error" in res:
+            print("[-] Lỗi từ Google AI:", res["error"].get("message", res["error"]))
+            return None
+            
         return res['candidates'][0]['content']['parts'][0]['text'].strip()
     except Exception as e:
-        print("Lỗi gọi Gemini:", e)
+        print("[-] Lỗi khi xử lý dữ liệu Gemini:", e)
         return None
 
-def def post_to_group_via_cookie(text):
+
+def post_to_group_via_cookie(text):
     session = requests.Session()
     session.headers.update(HEADERS)
     group_url = f"https://mbasic.facebook.com/groups/{GROUP_ID}"

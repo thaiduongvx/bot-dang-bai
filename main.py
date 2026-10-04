@@ -41,7 +41,7 @@ def get_gemini_question():
         print("Lỗi gọi Gemini:", e)
         return None
 
-def post_to_group_via_cookie(text):
+def def post_to_group_via_cookie(text):
     session = requests.Session()
     session.headers.update(HEADERS)
     group_url = f"https://mbasic.facebook.com/groups/{GROUP_ID}"
@@ -63,13 +63,18 @@ def post_to_group_via_cookie(text):
             if name:
                 data[name] = value
 
+        # Gán nội dung câu hỏi
         data["xc_message"] = text
         if "view_post" in data:
             data["view_post"] = "Đăng"
 
+        # KÍCH HOẠT ĐĂNG ẨN DANH:
+        data["post_anonymously"] = "true"
+        data["make_anonymous"] = "1"
+
         post_resp = session.post(action_url, data=data, timeout=30)
         if post_resp.status_code == 200:
-            print("[+] Đã gửi bài viết thành công qua Cookie!")
+            print("[+] Đã gửi bài viết ẩn danh thành công qua Cookie!")
             return True
         return False
     except Exception as e:

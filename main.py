@@ -4,7 +4,6 @@ import time
 import random
 import threading
 import requests
-from bs4 import BeautifulSoup
 from flask import Flask
 
 app = Flask(__name__)
@@ -17,10 +16,16 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 FB_COOKIE = os.getenv("FB_COOKIE")
 GROUP_ID = os.getenv("GROUP_ID")
 
+# Tự động làm sạch Cookie nếu bị dính dấu ngoặc kép thừa
+if FB_COOKIE:
+    FB_COOKIE = FB_COOKIE.strip('"').strip("'").strip()
+
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Cookie": FB_COOKIE
+    "Cookie": FB_COOKIE,
+    "Referer": "https://www.facebook.com/",
+    "Origin": "https://www.facebook.com"
 }
 
 def generate_local_question():
@@ -66,39 +71,87 @@ def get_question():
 def post_to_group_via_cookie(text):
     session = requests.Session()
     session.headers.update(HEADERS)
-    group_url = f"https://mbasic.facebook.com/groups/{GROUP_ID}"
 
     try:
-        resp = session.get(group_url, timeout=30)
-        soup = BeautifulSoup(resp.text, "html.parser")
-        form = soup.find("form", action=re.compile(r"/composer/mbasic/"))
-
-        if not form:
-            print("[-] Không tìm thấy khung đăng bài. Hãy kiểm tra lại Cookie!", flush=True)
+        # Bước 1: Vào trang chủ Facebook để lấy mã bảo mật fb_dtsg tự động
+        home_resp = session.get("https://www.facebook.com/", timeout=30)
+        
+        # Tìm mã token dtsg trong trang
+        fb_dtsg_match = re.search(r'"DTSGInitialData",\[\],{"token":"([^"]+)"', home_resp.text)
+        if not fb_dtsg_match:
+            fb_dtsg_match = re.search(r'name="fb_dtsg" value="([^"]+)"', home_resp.text)
+            
+        if not fb_dtsg_match:
+            print("[-] Không lấy được mã xác thực fb_dtsg. Cookie có thể bị đăng xuất hoặc sai định dạng!", flush=True)
             return False
 
-        action_url = "https://mbasic.facebook.com" + form.get("action")
-        data = {}
-        for input_tag in form.find_all("input"):
-            name = input_tag.get("name")
-            value = input_tag.get("value", "")
-            if name:
-                data[name] = value
+        fb_dtsg = fb_dtsg_match.group(1)
 
-        data["xc_message"] = text
-        if "view_post" in data:
-            data["view_post"] = "Đăng"
+        # Lấy c_user (User ID) từ Cookie
+        user_id_match = re.search(r'c_user=(\d+)', FB_COOKIE)
+        user_id = user_id_match.group(1) if user_id_match else ""
 
-        data["post_anonymously"] = "true"
-        data["make_anonymous"] = "1"
+        # Bước 2: Gửi bài viết trực tiếp qua cổng API GraphQL / Composer
+        post_url = "https://www.facebook.com/api/graphql/"
+        
+        # Cấu hình dữ liệu gửi bài vào Nhóm
+        form_data = {
+            "fb_dtsg": fb_dtsg,
+            "__user": user_id,
+            "__a": "1",
+            "req_format": "json"
+        }
 
-        post_resp = session.post(action_url, data=data, timeout=30)
-        if post_resp.status_code == 200:
-            print("[+] ĐÃ ĐĂNG BÀI THÀNH CÔNG VÀO HÀNG ĐỢI!", flush=True)
-            return True
+        # Thử phương thức gửi bài trực tiếp qua endpoint nhóm m.facebook
+        m_url = f"https://m.facebook.com/groups/{GROUP_ID}/"
+        m_resp = session.get(m_url, timeout=30)
+        
+        # Tìm action form trên giao diện di động hiện đại
+        composer_action = re.search(r'action="([^"]*composer[^"]*)"', m_resp.text)
+        
+        if composer_action:
+            target_url = "https://m.facebook.com" + composer_action.group(1).replace("&amp;", "&")
+            data = {
+                "fb_dtsg": fb_dtsg,
+                "message": text,
+                "view_post": "Đăng",
+                "post_anonymously": "true",
+                "make_anonymous": "1"
+            }
+            # Lấy tất cả input hidden trong trang m.facebook
+            inputs = re.findall(r'<input[^>]*name="([^"]+)"[^>]*value="([^"]*)"', m_resp.text)
+            for name, val in inputs:
+                if name not in data:
+                    data[name] = val
+            data["message"] = text
+
+            res = session.post(target_url, data=data, timeout=30)
+            if res.status_code in [200, 302]:
+                print("[+] ĐÃ ĐĂNG BÀI THÀNH CÔNG VÀO HÀNG ĐỢI!", flush=True)
+                return True
+        else:
+            # Dự phòng qua Graph API mbasic fallback tự động
+            mb_url = f"https://mbasic.facebook.com/composer/mbasic/?c_src=group&target={GROUP_ID}"
+            mb_resp = session.get(mb_url, timeout=30)
+            target = re.search(r'action="([^"]*composer[^"]*)"', mb_resp.text)
+            if target:
+                act = "https://mbasic.facebook.com" + target.group(1).replace("&amp;", "&")
+                data = {"fb_dtsg": fb_dtsg, "xc_message": text, "view_post": "Đăng"}
+                inputs = re.findall(r'<input[^>]*name="([^"]+)"[^>]*value="([^"]*)"', mb_resp.text)
+                for name, val in inputs:
+                    if name not in data:
+                        data[name] = val
+                data["xc_message"] = text
+                post_res = session.post(act, data=data, timeout=30)
+                if post_res.status_code in [200, 302]:
+                    print("[+] ĐÃ ĐĂNG BÀI THÀNH CÔNG VÀO HÀNG ĐỢI!", flush=True)
+                    return True
+
+        print("[-] Không gửi được form bài viết. Facebook có thể đang yêu cầu xác minh bảo mật.", flush=True)
         return False
+
     except Exception as e:
-        print("[-] Lỗi gửi bài:", e, flush=True)
+        print("[-] Lỗi khi xử lý gửi bài:", e, flush=True)
         return False
 
 def bot_loop():

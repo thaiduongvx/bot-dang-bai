@@ -1,0 +1,87 @@
+import os
+import re
+import time
+import random
+import requests
+from bs4 import BeautifulSoup
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+FB_COOKIE = os.getenv("FB_COOKIE")
+GROUP_ID = os.getenv("GROUP_ID")
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1",
+    "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Cookie": FB_COOKIE
+}
+
+def get_gemini_question():
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    prompt = (
+        "Đóng vai một khách du lịch thật đang muốn đi Hà Giang hoặc vừa đi về. "
+        "Hãy viết 1 câu hỏi ngắn (2 đến 3 câu) đăng lên nhóm review để hỏi kinh nghiệm "
+        "về các chủ đề: thời tiết, tìm tour, thuê xe máy, homestay Lô Lô Chải, đường đèo Mã Pí Lèng, "
+        "thuyền sông Nho Quế, quán ăn... Văn phong tự nhiên, đời thường. "
+        "Chỉ trả về duy nhất nội dung câu hỏi, không thêm bất kỳ lời dẫn nào."
+    )
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+    try:
+        res = requests.post(url, json=payload, timeout=30).json()
+        return res['candidates'][0]['content']['parts'][0]['text'].strip()
+    except Exception as e:
+        print("Lỗi gọi Gemini:", e)
+        return None
+
+def post_to_group_via_cookie(text):
+    session = requests.Session()
+    session.headers.update(HEADERS)
+    group_url = f"https://mbasic.facebook.com/groups/{GROUP_ID}"
+
+    try:
+        resp = session.get(group_url, timeout=30)
+        soup = BeautifulSoup(resp.text, "html.parser")
+        form = soup.find("form", action=re.compile(r"/composer/mbasic/"))
+
+        if not form:
+            print("[-] Không tìm thấy form đăng bài. Hãy kiểm tra lại Cookie xem có chuẩn không!")
+            return False
+
+        action_url = "https://mbasic.facebook.com" + form.get("action")
+        
+        data = {}
+        for input_tag in form.find_all("input"):
+            name = input_tag.get("name")
+            value = input_tag.get("value", "")
+            if name:
+                data[name] = value
+
+        data["xc_message"] = text
+        if "view_post" in data:
+            data["view_post"] = "Đăng"
+
+        post_resp = session.post(action_url, data=data, timeout=30)
+        if post_resp.status_code == 200:
+            print("[+] Đã gửi bài viết thành công qua Cookie!")
+            return True
+        else:
+            print(f"[-] Gửi bài thất bại, mã phản hồi: {post_resp.status_code}")
+            return False
+
+    except Exception as e:
+        print("[-] Lỗi khi xử lý:", e)
+        return False
+
+print("=== Bot bắt đầu khởi động trên đám mây ===", flush=True)
+
+while True:
+    print("Đang gọi Gemini tạo câu hỏi mới...", flush=True)
+    question = get_gemini_question()
+
+    if question:
+        print(f"Nội dung: {question}", flush=True)
+        post_to_group_via_cookie(question)
+
+    # Nghỉ 1 tiếng (3600 giây) + ngẫu nhiên thêm 1 đến 3 phút
+    delay = 3600 + random.randint(60, 180)
+    print(f"Đang nghỉ {delay // 60} phút trước bài tiếp theo...", flush=True)
+    time.sleep(delay)

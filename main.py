@@ -2,8 +2,17 @@ import os
 import re
 import time
 import random
+import threading
 import requests
 from bs4 import BeautifulSoup
+from flask import Flask
+
+# Tạo một web server mini để Render nhận diện là Web Service Free
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot dang chay ngon lanh!"
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 FB_COOKIE = os.getenv("FB_COOKIE")
@@ -43,11 +52,10 @@ def post_to_group_via_cookie(text):
         form = soup.find("form", action=re.compile(r"/composer/mbasic/"))
 
         if not form:
-            print("[-] Không tìm thấy form đăng bài. Hãy kiểm tra lại Cookie xem có chuẩn không!")
+            print("[-] Không tìm thấy form đăng bài. Kiểm tra lại Cookie!")
             return False
 
         action_url = "https://mbasic.facebook.com" + form.get("action")
-        
         data = {}
         for input_tag in form.find_all("input"):
             name = input_tag.get("name")
@@ -63,25 +71,27 @@ def post_to_group_via_cookie(text):
         if post_resp.status_code == 200:
             print("[+] Đã gửi bài viết thành công qua Cookie!")
             return True
-        else:
-            print(f"[-] Gửi bài thất bại, mã phản hồi: {post_resp.status_code}")
-            return False
-
+        return False
     except Exception as e:
-        print("[-] Lỗi khi xử lý:", e)
+        print("[-] Lỗi:", e)
         return False
 
-print("=== Bot bắt đầu khởi động trên đám mây ===", flush=True)
+def bot_loop():
+    print("=== Bot bắt đầu chạy ngầm ===", flush=True)
+    while True:
+        print("Đang gọi Gemini tạo câu hỏi mới...", flush=True)
+        question = get_gemini_question()
+        if question:
+            print(f"Nội dung: {question}", flush=True)
+            post_to_group_via_cookie(question)
+        
+        delay = 3600 + random.randint(60, 180)
+        print(f"Đang nghỉ {delay // 60} phút...", flush=True)
+        time.sleep(delay)
 
-while True:
-    print("Đang gọi Gemini tạo câu hỏi mới...", flush=True)
-    question = get_gemini_question()
+# Chạy bot ở một luồng ngầm riêng biệt
+threading.Thread(target=bot_loop, daemon=True).start()
 
-    if question:
-        print(f"Nội dung: {question}", flush=True)
-        post_to_group_via_cookie(question)
-
-    # Nghỉ 1 tiếng (3600 giây) + ngẫu nhiên thêm 1 đến 3 phút
-    delay = 3600 + random.randint(60, 180)
-    print(f"Đang nghỉ {delay // 60} phút trước bài tiếp theo...", flush=True)
-    time.sleep(delay)
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)

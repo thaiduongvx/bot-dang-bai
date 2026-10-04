@@ -25,8 +25,8 @@ HEADERS = {
 }
 
 def get_gemini_question():
-    # Sử dụng đúng endpoint v1beta và model gemini-2.5-flash
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+    # Sử dụng đúng endpoint v1beta và model gemini-3.8-flash
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key={GEMINI_API_KEY}"
     prompt = (
         "Đóng vai một khách du lịch thật đang muốn đi Hà Giang hoặc vừa đi về. "
         "Hãy viết 1 câu hỏi ngắn (2 đến 3 câu) đăng lên nhóm review để hỏi kinh nghiệm "
